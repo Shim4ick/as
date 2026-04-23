@@ -46,7 +46,20 @@ export class Room {
   }
 
   addPeer(userId: string, socketId: string) {
-    if (this.peers.has(userId)) return;
+    const existingPeer = this.peers.get(userId);
+    if (existingPeer) {
+      if (existingPeer.socketId === socketId) return;
+
+      for (const [, consumer] of existingPeer.consumers) {
+        consumer.close();
+      }
+      for (const [, producer] of existingPeer.producers) {
+        producer.close();
+      }
+      existingPeer.sendTransport?.close();
+      existingPeer.recvTransport?.close();
+    }
+
     this.peers.set(userId, {
       userId,
       socketId,
@@ -204,9 +217,10 @@ export class Room {
     return producers;
   }
 
-  removePeer(userId: string) {
+  removePeer(userId: string, socketId?: string) {
     const peer = this.peers.get(userId);
     if (!peer) return;
+    if (socketId && peer.socketId !== socketId) return;
 
     for (const [, consumer] of peer.consumers) {
       consumer.close();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { useSession } from "next-auth/react";
 import type { ServerToClientEvents, ClientToServerEvents } from "@as/shared";
@@ -8,6 +8,7 @@ import type { ServerToClientEvents, ClientToServerEvents } from "@as/shared";
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let globalSocket: TypedSocket | null = null;
+let globalSocketUserId: string | null = null;
 
 export function useSocket() {
   const { data: session } = useSession();
@@ -20,34 +21,40 @@ export function useSocket() {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     if (!socketUrl) return;
 
-    if (globalSocket?.connected) {
-      setSocket(globalSocket);
-      setConnected(true);
-      return;
+    if (globalSocket && globalSocketUserId !== session.user.id) {
+      globalSocket.disconnect();
+      globalSocket = null;
+      globalSocketUserId = null;
     }
 
-    const s = io(socketUrl, {
-      auth: { userId: session.user.id, token: session.user.id },
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    }) as TypedSocket;
+    if (!globalSocket) {
+      globalSocket = io(socketUrl, {
+        auth: { userId: session.user.id, token: session.user.id },
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      }) as TypedSocket;
+      globalSocketUserId = session.user.id;
+    }
 
-    s.on("connect", () => {
+    const activeSocket = globalSocket;
+    const handleConnect = () => {
       setConnected(true);
-    });
-
-    s.on("disconnect", () => {
+    };
+    const handleDisconnect = () => {
       setConnected(false);
-    });
+    };
 
-    globalSocket = s;
-    setSocket(s);
+    setSocket(activeSocket);
+    setConnected(activeSocket.connected);
+    activeSocket.on("connect", handleConnect);
+    activeSocket.on("disconnect", handleDisconnect);
 
     return () => {
-      // Don't disconnect on unmount — keep global connection alive
+      activeSocket.off("connect", handleConnect);
+      activeSocket.off("disconnect", handleDisconnect);
     };
   }, [session?.user?.id]);
 

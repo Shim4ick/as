@@ -38,6 +38,7 @@ export function registerSignalingHandlers(io: Server, socket: Socket) {
       try {
         const room = getRoom(data.roomId);
         if (!room) throw new Error("Room not found");
+        room.addPeer(userId, socket.id);
 
         const transport = await room.createTransport(userId, data.direction);
         if (ack) ack(transport as unknown as Record<string, unknown>);
@@ -176,15 +177,17 @@ export function registerSignalingHandlers(io: Server, socket: Socket) {
       if (roomId === socket.id) continue;
       const room = getRoom(roomId);
       if (!room) continue;
+      const peer = room.peers.get(userId);
+      if (!peer || peer.socketId !== socket.id) continue;
 
-      const producers = [...(room.peers.get(userId)?.producers.values() || [])];
+      const producers = [...peer.producers.values()];
       for (const producer of producers) {
         socket.to(roomId).emit("media:producer-closed", {
           producerId: producer.id,
         });
       }
 
-      room.removePeer(userId);
+      room.removePeer(userId, socket.id);
     }
   });
 }
