@@ -27,6 +27,7 @@ export function ChatView({
   const typingTimeout = useRef<NodeJS.Timeout>();
   const { socket, connected } = useSocket();
   const initiateCall = useCallStore((s) => s.initiateCall);
+  const setCallId = useCallStore((s) => s.setCallId);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -96,6 +97,19 @@ export function ChatView({
     }
   }
 
+  function handleStartCall(type: "VOICE" | "VIDEO") {
+    if (!socket || !connected) return;
+
+    initiateCall(conversationId, type, {
+      id: otherUser.id,
+      name: otherUser.displayName,
+    });
+
+    socket.emit("call:initiate", { conversationId, type }, (callId: string) => {
+      setCallId(callId);
+    });
+  }
+
   return (
     <div className="flex flex-1 flex-col bg-bg-primary">
       {/* Header */}
@@ -128,23 +142,13 @@ export function ChatView({
 
         <div className="flex items-center gap-1">
           <button
-            onClick={() =>
-              initiateCall(conversationId, "VOICE", {
-                id: otherUser.id,
-                name: otherUser.displayName,
-              })
-            }
+            onClick={() => handleStartCall("VOICE")}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             <Phone size={18} />
           </button>
           <button
-            onClick={() =>
-              initiateCall(conversationId, "VIDEO", {
-                id: otherUser.id,
-                name: otherUser.displayName,
-              })
-            }
+            onClick={() => handleStartCall("VIDEO")}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             <Video size={18} />

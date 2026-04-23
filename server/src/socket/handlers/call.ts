@@ -23,6 +23,58 @@ export function registerCallHandlers(io: Server, socket: Socket) {
           return;
         }
 
+        const calleeId = participant.userId;
+
+        const reciprocalCall = await prisma.call.findFirst({
+          where: {
+            conversationId: data.conversationId,
+            status: "RINGING",
+            callerId: calleeId,
+            calleeId: userId,
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (reciprocalCall) {
+          const activeCall = await prisma.call.update({
+            where: { id: reciprocalCall.id },
+            data: {
+              status: "ACTIVE",
+              answeredAt: reciprocalCall.answeredAt ?? new Date(),
+              type: data.type,
+            },
+          });
+
+          if (ack) ack(activeCall.id);
+
+          const callerSocket = await getUserSocket(activeCall.callerId);
+          const calleeSocket = await getUserSocket(activeCall.calleeId);
+
+          if (callerSocket) {
+            io.to(callerSocket).emit("call:accepted", { callId: activeCall.id });
+          }
+          if (calleeSocket) {
+            io.to(calleeSocket).emit("call:accepted", { callId: activeCall.id });
+          }
+
+          return;
+        }
+
+        const ownRingingCall = await prisma.call.findFirst({
+          where: {
+            conversationId: data.conversationId,
+            status: "RINGING",
+            callerId: userId,
+            calleeId,
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (ownRingingCall) {
+          if (ack) ack(ownRingingCall.id);
+          return;
+        }
+
         const caller = await prisma.user.findUnique({
           where: { id: userId },
           select: { displayName: true },
@@ -32,7 +84,7 @@ export function registerCallHandlers(io: Server, socket: Socket) {
           data: {
             conversationId: data.conversationId,
             callerId: userId,
-            calleeId: participant.userId,
+            calleeId,
             type: data.type,
             status: "RINGING",
           },
@@ -40,7 +92,7 @@ export function registerCallHandlers(io: Server, socket: Socket) {
 
         if (ack) ack(call.id);
 
-        const calleeSocket = await getUserSocket(participant.userId);
+        const calleeSocket = await getUserSocket(calleeId);
         if (calleeSocket) {
           io.to(calleeSocket).emit("call:incoming", {
             callId: call.id,
