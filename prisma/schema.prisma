@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  displayName  String   @map("display_name")
+  avatarUrl    String?  @map("avatar_url")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
+
+  conversations ConversationParticipant[]
+  sentMessages  Message[]
+  callsInitiated Call[] @relation("CallCaller")
+  callsReceived  Call[] @relation("CallCallee")
+
+  @@index([username])
+  @@index([displayName])
+  @@map("users")
+}
+
+model Conversation {
+  id        String           @id @default(cuid())
+  type      ConversationType @default(DM)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  calls        Call[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String    @id @default(cuid())
+  conversationId String    @map("conversation_id")
+  userId         String    @map("user_id")
+  joinedAt       DateTime  @default(now()) @map("joined_at")
+  lastReadAt     DateTime? @map("last_read_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String      @map("conversation_id")
+  senderId       String      @map("sender_id")
+  content        String
+  type           MessageType @default(TEXT)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  editedAt       DateTime?   @map("edited_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
+
+model Call {
+  id             String     @id @default(cuid())
+  conversationId String     @map("conversation_id")
+  callerId       String     @map("caller_id")
+  calleeId       String     @map("callee_id")
+  type           CallType
+  status         CallStatus @default(RINGING)
+  startedAt      DateTime   @default(now()) @map("started_at")
+  answeredAt     DateTime?  @map("answered_at")
+  endedAt        DateTime?  @map("ended_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  caller       User         @relation("CallCaller", fields: [callerId], references: [id])
+  callee       User         @relation("CallCallee", fields: [calleeId], references: [id])
+
+  @@index([conversationId])
+  @@index([callerId])
+  @@index([calleeId])
+  @@map("calls")
+}
+
+enum ConversationType {
+  DM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
+enum CallType {
+  VOICE
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ACTIVE
+  ENDED
+  MISSED
+  REJECTED
+}

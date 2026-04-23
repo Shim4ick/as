@@ -1,0 +1,22 @@
+node_modules/
+.next/
+dist/
+.turbo/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.production
+
+.DS_Store
+Thumbs.db
+
+# Prisma
+prisma/migrations/**/migration_lock.toml
+
+# Electron
+apps/desktop/out/
+
+# Capacitor
+apps/mobile/android/
+apps/mobile/ios/

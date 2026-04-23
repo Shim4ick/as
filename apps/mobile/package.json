@@ -1,0 +1,20 @@
+{
+  "name": "@as/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Use capacitor CLI to build'",
+    "sync": "npx cap sync",
+    "open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}
