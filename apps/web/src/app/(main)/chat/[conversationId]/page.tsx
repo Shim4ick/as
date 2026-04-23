@@ -11,7 +11,8 @@ interface Props {
 export default async function ConversationPage({ params }: Props) {
   const { conversationId } = await params;
   const session = await auth();
-  const userId = session!.user!.id;
+  if (!session?.user?.id) notFound();
+  const userId = session.user.id;
 
   const conversation = await prisma.conversation.findFirst({
     where: {
