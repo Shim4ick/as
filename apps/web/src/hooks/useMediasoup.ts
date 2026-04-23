@@ -1,8 +1,11 @@
 "use client";
 
 import { useRef, useCallback, useState } from "react";
-import { Device } from "mediasoup-client";
-import type { Transport, Producer, Consumer } from "mediasoup-client/lib/types";
+import { Device, type types } from "mediasoup-client";
+
+type Transport = types.Transport;
+type Producer = types.Producer;
+type Consumer = types.Consumer;
 import { useSocket } from "./useSocket";
 import {
   AUDIO_CONSTRAINTS,
