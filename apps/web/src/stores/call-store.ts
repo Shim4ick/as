@@ -8,8 +8,11 @@ export type CallState =
   | "connected"
   | "ended";
 
+export type CallDirection = "incoming" | "outgoing" | null;
+
 interface CallStore {
   state: CallState;
+  direction: CallDirection;
   callId: string | null;
   conversationId: string | null;
   callType: CallType | null;
@@ -20,7 +23,14 @@ interface CallStore {
   isScreenSharing: boolean;
   callDuration: number;
 
-  initiateCall: (conversationId: string, type: CallType) => void;
+  initiateCall: (
+    conversationId: string,
+    type: CallType,
+    remoteUser?: {
+      id: string;
+      name: string;
+    },
+  ) => void;
   receiveCall: (data: {
     callId: string;
     callerId: string;
@@ -42,6 +52,7 @@ interface CallStore {
 
 export const useCallStore = create<CallStore>((set) => ({
   state: "idle",
+  direction: null,
   callId: null,
   conversationId: null,
   callType: null,
@@ -52,11 +63,14 @@ export const useCallStore = create<CallStore>((set) => ({
   isScreenSharing: false,
   callDuration: 0,
 
-  initiateCall: (conversationId, type) =>
+  initiateCall: (conversationId, type, remoteUser) =>
     set({
       state: "ringing",
+      direction: "outgoing",
       conversationId,
       callType: type,
+      remoteUserId: remoteUser?.id ?? null,
+      remoteUserName: remoteUser?.name ?? null,
       callDuration: 0,
       isMuted: false,
       isVideoOff: type === "VOICE",
@@ -66,6 +80,7 @@ export const useCallStore = create<CallStore>((set) => ({
   receiveCall: (data) =>
     set({
       state: "ringing",
+      direction: "incoming",
       callId: data.callId,
       conversationId: data.conversationId,
       callType: data.type,
@@ -87,6 +102,7 @@ export const useCallStore = create<CallStore>((set) => ({
   reset: () =>
     set({
       state: "idle",
+      direction: null,
       callId: null,
       conversationId: null,
       callType: null,

@@ -7,116 +7,152 @@ import { useCallStore } from "@/stores/call-store";
 
 export function useCall() {
   const { socket } = useSocket();
-  const mediasoup = useMediasoup();
+  const {
+    joinRoom,
+    produceAudio,
+    produceVideo,
+    produceScreenShare,
+    stopScreenShare,
+    toggleMute: toggleMediasoupMute,
+    toggleVideo: toggleMediasoupVideo,
+    leaveRoom,
+    localStream,
+    remoteStreams,
+  } = useMediasoup();
   const store = useCallStore();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("call:incoming", (data) => {
-      store.receiveCall(data);
-    });
-
-    socket.on("call:accepted", async (data) => {
-      store.setConnecting();
-      await startMedia(data.callId);
-    });
-
-    socket.on("call:rejected", () => {
-      store.endCall();
-      setTimeout(() => store.reset(), 2000);
-    });
-
-    socket.on("call:ended", () => {
-      mediasoup.leaveRoom();
-      store.endCall();
-      if (timerRef.current) clearInterval(timerRef.current);
-      setTimeout(() => store.reset(), 2000);
-    });
-
-    return () => {
-      socket.off("call:incoming");
-      socket.off("call:accepted");
-      socket.off("call:rejected");
-      socket.off("call:ended");
-    };
-  }, [socket]);
 
   const startMedia = useCallback(
     async (callId: string) => {
       try {
-        await mediasoup.joinRoom(callId);
-        await mediasoup.produceAudio();
+        await joinRoom(callId);
+        await produceAudio();
 
-        if (store.callType === "VIDEO") {
-          await mediasoup.produceVideo();
+        if (useCallStore.getState().callType === "VIDEO") {
+          await produceVideo();
         }
 
-        store.setConnected();
-        timerRef.current = setInterval(() => store.tick(), 1000);
+        useCallStore.getState().setConnected();
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => {
+          useCallStore.getState().tick();
+        }, 1000);
       } catch (err) {
         console.error("Failed to start media:", err);
-        store.endCall();
+        useCallStore.getState().endCall();
       }
     },
-    [mediasoup, store],
+    [joinRoom, produceAudio, produceVideo],
   );
 
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleIncoming = (data: {
+      callId: string;
+      callerId: string;
+      callerName: string;
+      type: "VOICE" | "VIDEO";
+      conversationId: string;
+    }) => {
+      useCallStore.getState().receiveCall(data);
+    };
+
+    const handleAccepted = async (data: { callId: string }) => {
+      useCallStore.getState().setConnecting();
+      await startMedia(data.callId);
+    };
+
+    const handleRejected = () => {
+      useCallStore.getState().endCall();
+      if (timerRef.current) clearInterval(timerRef.current);
+      setTimeout(() => useCallStore.getState().reset(), 2000);
+    };
+
+    const handleEnded = () => {
+      leaveRoom();
+      useCallStore.getState().endCall();
+      if (timerRef.current) clearInterval(timerRef.current);
+      setTimeout(() => useCallStore.getState().reset(), 2000);
+    };
+
+    socket.on("call:incoming", handleIncoming);
+    socket.on("call:accepted", handleAccepted);
+    socket.on("call:rejected", handleRejected);
+    socket.on("call:ended", handleEnded);
+
+    return () => {
+      socket.off("call:incoming", handleIncoming);
+      socket.off("call:accepted", handleAccepted);
+      socket.off("call:rejected", handleRejected);
+      socket.off("call:ended", handleEnded);
+    };
+  }, [leaveRoom, socket, startMedia]);
+
   const initiate = useCallback(
-    (conversationId: string, type: "VOICE" | "VIDEO") => {
+    (
+      conversationId: string,
+      type: "VOICE" | "VIDEO",
+      remoteUser?: { id: string; name: string },
+    ) => {
       if (!socket) return;
 
-      store.initiateCall(conversationId, type);
+      useCallStore.getState().initiateCall(conversationId, type, remoteUser);
       socket.emit("call:initiate", { conversationId, type }, (callId: string) => {
-        store.setCallId(callId);
+        useCallStore.getState().setCallId(callId);
       });
     },
-    [socket, store],
+    [socket],
   );
 
   const accept = useCallback(async () => {
-    if (!socket || !store.callId) return;
+    const { callId } = useCallStore.getState();
+    if (!socket || !callId) return;
 
-    store.acceptCall();
-    socket.emit("call:accept", { callId: store.callId });
-    await startMedia(store.callId);
-  }, [socket, store, startMedia]);
+    useCallStore.getState().acceptCall();
+    socket.emit("call:accept", { callId });
+    await startMedia(callId);
+  }, [socket, startMedia]);
 
   const reject = useCallback(() => {
-    if (!socket || !store.callId) return;
-    socket.emit("call:reject", { callId: store.callId });
-    store.reset();
-  }, [socket, store]);
+    const { callId } = useCallStore.getState();
+    if (!socket || !callId) return;
+    socket.emit("call:reject", { callId });
+    useCallStore.getState().reset();
+  }, [socket]);
 
   const hangUp = useCallback(() => {
-    if (!socket || !store.callId) return;
-    socket.emit("call:end", { callId: store.callId });
-    mediasoup.leaveRoom();
+    const { callId } = useCallStore.getState();
+    if (!socket || !callId) return;
+    socket.emit("call:end", { callId });
+    leaveRoom();
     if (timerRef.current) clearInterval(timerRef.current);
-    store.endCall();
-    setTimeout(() => store.reset(), 2000);
-  }, [socket, store, mediasoup]);
+    useCallStore.getState().endCall();
+    setTimeout(() => useCallStore.getState().reset(), 2000);
+  }, [leaveRoom, socket]);
 
   const toggleMute = useCallback(() => {
-    store.toggleMute();
-    mediasoup.toggleMute(!store.isMuted);
-  }, [store, mediasoup]);
+    const { isMuted, toggleMute } = useCallStore.getState();
+    toggleMute();
+    toggleMediasoupMute(!isMuted);
+  }, [toggleMediasoupMute]);
 
   const toggleVideo = useCallback(() => {
-    store.toggleVideo();
-    mediasoup.toggleVideo(!store.isVideoOff);
-  }, [store, mediasoup]);
+    const { isVideoOff, toggleVideo } = useCallStore.getState();
+    toggleVideo();
+    toggleMediasoupVideo(!isVideoOff);
+  }, [toggleMediasoupVideo]);
 
   const toggleScreenShare = useCallback(async () => {
-    if (store.isScreenSharing) {
-      mediasoup.stopScreenShare();
-      store.toggleScreenShare();
+    const { isScreenSharing, toggleScreenShare } = useCallStore.getState();
+    if (isScreenSharing) {
+      stopScreenShare();
+      toggleScreenShare();
     } else {
-      await mediasoup.produceScreenShare();
-      store.toggleScreenShare();
+      await produceScreenShare();
+      toggleScreenShare();
     }
-  }, [store, mediasoup]);
+  }, [produceScreenShare, stopScreenShare]);
 
   return {
     ...store,
@@ -127,7 +163,7 @@ export function useCall() {
     toggleMute,
     toggleVideo,
     toggleScreenShare,
-    localStream: mediasoup.localStream,
-    remoteStreams: mediasoup.remoteStreams,
+    localStream,
+    remoteStreams,
   };
 }

@@ -28,112 +28,39 @@ export function useMediasoup() {
   const recvTransportRef = useRef<Transport | null>(null);
   const producersRef = useRef<Map<string, Producer>>(new Map());
   const consumersRef = useRef<Map<string, Consumer>>(new Map());
+  const pendingProducersRef = useRef<
+    Array<{ producerId: string; appData: Record<string, unknown> }>
+  >([]);
+  const producerListenerRef = useRef<
+    ((data: {
+      producerId: string;
+      appData: Record<string, unknown>;
+    }) => void) | null
+  >(null);
+  const producerClosedListenerRef = useRef<
+    ((data: { producerId: string }) => void) | null
+  >(null);
   const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
-  const joinRoom = useCallback(
-    async (roomId: string) => {
-      if (!socket) throw new Error("Socket not connected");
+  const cleanupSocketListeners = useCallback(() => {
+    if (!socket) return;
 
-      const rtpCapabilities = await new Promise<Record<string, unknown>>(
-        (resolve) => {
-          socket.emit(
-            "media:get-router-rtp-capabilities",
-            { roomId },
-            resolve,
-          );
-        },
-      );
+    if (producerListenerRef.current) {
+      socket.off("media:new-producer", producerListenerRef.current);
+      producerListenerRef.current = null;
+    }
 
-      const device = new Device();
-      await device.load({
-        routerRtpCapabilities: rtpCapabilities as any,
-      });
-      deviceRef.current = device;
-
-      const sendTransportOptions = await new Promise<Record<string, unknown>>(
-        (resolve) => {
-          socket.emit(
-            "media:create-transport",
-            { roomId, direction: "send" },
-            resolve,
-          );
-        },
-      );
-
-      const sendTransport = device.createSendTransport(
-        sendTransportOptions as any,
-      );
-      sendTransportRef.current = sendTransport;
-
-      sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
-        socket.emit(
-          "media:connect-transport",
-          { transportId: sendTransport.id, dtlsParameters: dtlsParameters as any },
-          () => callback(),
-        );
-      });
-
-      sendTransport.on(
-        "produce",
-        ({ kind, rtpParameters, appData }, callback, errback) => {
-          socket.emit(
-            "media:produce",
-            {
-              transportId: sendTransport.id,
-              kind,
-              rtpParameters: rtpParameters as any,
-              appData: appData as Record<string, unknown>,
-            },
-            (producerId: string) => callback({ id: producerId }),
-          );
-        },
-      );
-
-      const recvTransportOptions = await new Promise<Record<string, unknown>>(
-        (resolve) => {
-          socket.emit(
-            "media:create-transport",
-            { roomId, direction: "recv" },
-            resolve,
-          );
-        },
-      );
-
-      const recvTransport = device.createRecvTransport(
-        recvTransportOptions as any,
-      );
-      recvTransportRef.current = recvTransport;
-
-      recvTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
-        socket.emit(
-          "media:connect-transport",
-          { transportId: recvTransport.id, dtlsParameters: dtlsParameters as any },
-          () => callback(),
-        );
-      });
-
-      socket.on("media:new-producer", async (data) => {
-        await consumeProducer(data.producerId, data.appData);
-      });
-
-      socket.on("media:producer-closed", (data) => {
-        const consumer = consumersRef.current.get(data.producerId);
-        if (consumer) {
-          consumer.close();
-          consumersRef.current.delete(data.producerId);
-          setRemoteStreams((prev) =>
-            prev.filter((s) => s.consumerId !== consumer.id),
-          );
-        }
-      });
-    },
-    [socket],
-  );
+    if (producerClosedListenerRef.current) {
+      socket.off("media:producer-closed", producerClosedListenerRef.current);
+      producerClosedListenerRef.current = null;
+    }
+  }, [socket]);
 
   const consumeProducer = useCallback(
     async (producerId: string, appData: Record<string, unknown>) => {
       if (!socket || !deviceRef.current || !recvTransportRef.current) return;
+      if (consumersRef.current.has(producerId)) return;
 
       const consumerOptions = await new Promise<Record<string, unknown>>(
         (resolve) => {
@@ -174,6 +101,142 @@ export function useMediasoup() {
       ]);
     },
     [socket],
+  );
+
+  const joinRoom = useCallback(
+    async (roomId: string) => {
+      if (!socket) throw new Error("Socket not connected");
+
+      cleanupSocketListeners();
+      pendingProducersRef.current = [];
+
+      const handleNewProducer = (data: {
+        producerId: string;
+        appData: Record<string, unknown>;
+      }) => {
+        const alreadyQueued = pendingProducersRef.current.some(
+          (entry) => entry.producerId === data.producerId,
+        );
+        const alreadyConsuming = consumersRef.current.has(data.producerId);
+        if (alreadyQueued || alreadyConsuming) return;
+
+        if (!deviceRef.current || !recvTransportRef.current) {
+          pendingProducersRef.current.push({
+            producerId: data.producerId,
+            appData: data.appData,
+          });
+          return;
+        }
+
+        void consumeProducer(data.producerId, data.appData);
+      };
+
+      const handleProducerClosed = (data: { producerId: string }) => {
+        pendingProducersRef.current = pendingProducersRef.current.filter(
+          (entry) => entry.producerId !== data.producerId,
+        );
+
+        const consumer = consumersRef.current.get(data.producerId);
+        if (!consumer) return;
+
+        consumer.close();
+        consumersRef.current.delete(data.producerId);
+        setRemoteStreams((prev) =>
+          prev.filter((s) => s.consumerId !== consumer.id),
+        );
+      };
+
+      producerListenerRef.current = handleNewProducer;
+      producerClosedListenerRef.current = handleProducerClosed;
+      socket.on("media:new-producer", handleNewProducer);
+      socket.on("media:producer-closed", handleProducerClosed);
+
+      const rtpCapabilities = await new Promise<Record<string, unknown>>(
+        (resolve) => {
+          socket.emit(
+            "media:get-router-rtp-capabilities",
+            { roomId },
+            resolve,
+          );
+        },
+      );
+
+      const device = new Device();
+      await device.load({
+        routerRtpCapabilities: rtpCapabilities as any,
+      });
+      deviceRef.current = device;
+
+      const sendTransportOptions = await new Promise<Record<string, unknown>>(
+        (resolve) => {
+          socket.emit(
+            "media:create-transport",
+            { roomId, direction: "send" },
+            resolve,
+          );
+        },
+      );
+
+      const sendTransport = device.createSendTransport(
+        sendTransportOptions as any,
+      );
+      sendTransportRef.current = sendTransport;
+
+      sendTransport.on("connect", ({ dtlsParameters }, callback) => {
+        socket.emit(
+          "media:connect-transport",
+          { transportId: sendTransport.id, dtlsParameters: dtlsParameters as any },
+          () => callback(),
+        );
+      });
+
+      sendTransport.on(
+        "produce",
+        ({ kind, rtpParameters, appData }, callback) => {
+          socket.emit(
+            "media:produce",
+            {
+              transportId: sendTransport.id,
+              kind,
+              rtpParameters: rtpParameters as any,
+              appData: appData as Record<string, unknown>,
+            },
+            (producerId: string) => callback({ id: producerId }),
+          );
+        },
+      );
+
+      const recvTransportOptions = await new Promise<Record<string, unknown>>(
+        (resolve) => {
+          socket.emit(
+            "media:create-transport",
+            { roomId, direction: "recv" },
+            resolve,
+          );
+        },
+      );
+
+      const recvTransport = device.createRecvTransport(
+        recvTransportOptions as any,
+      );
+      recvTransportRef.current = recvTransport;
+
+      recvTransport.on("connect", ({ dtlsParameters }, callback) => {
+        socket.emit(
+          "media:connect-transport",
+          { transportId: recvTransport.id, dtlsParameters: dtlsParameters as any },
+          () => callback(),
+        );
+      });
+
+      const pendingProducers = [...pendingProducersRef.current];
+      pendingProducersRef.current = [];
+
+      for (const producer of pendingProducers) {
+        await consumeProducer(producer.producerId, producer.appData);
+      }
+    },
+    [cleanupSocketListeners, consumeProducer, socket],
   );
 
   const produceAudio = useCallback(async () => {
@@ -334,16 +397,19 @@ export function useMediasoup() {
       consumer.close();
     }
     consumersRef.current.clear();
+    pendingProducersRef.current = [];
 
     sendTransportRef.current?.close();
     recvTransportRef.current?.close();
     sendTransportRef.current = null;
     recvTransportRef.current = null;
+    deviceRef.current = null;
 
     localStream?.getTracks().forEach((t) => t.stop());
     setLocalStream(null);
     setRemoteStreams([]);
-  }, [localStream]);
+    cleanupSocketListeners();
+  }, [cleanupSocketListeners, localStream]);
 
   return {
     joinRoom,

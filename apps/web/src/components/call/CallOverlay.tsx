@@ -43,6 +43,7 @@ export function CallOverlay() {
 
   if (
     call.state === "ringing" &&
+    call.direction === "incoming" &&
     call.remoteUserId &&
     call.remoteUserName
   ) {

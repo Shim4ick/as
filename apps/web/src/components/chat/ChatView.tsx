@@ -128,13 +128,23 @@ export function ChatView({
 
         <div className="flex items-center gap-1">
           <button
-            onClick={() => initiateCall(conversationId, "VOICE")}
+            onClick={() =>
+              initiateCall(conversationId, "VOICE", {
+                id: otherUser.id,
+                name: otherUser.displayName,
+              })
+            }
             className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             <Phone size={18} />
           </button>
           <button
-            onClick={() => initiateCall(conversationId, "VIDEO")}
+            onClick={() =>
+              initiateCall(conversationId, "VIDEO", {
+                id: otherUser.id,
+                name: otherUser.displayName,
+              })
+            }
             className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             <Video size={18} />
